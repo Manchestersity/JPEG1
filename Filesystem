@@ -1,0 +1,162 @@
+// filesystem.c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_FILESYSTEM_SIZE 1000000
+
+FILE *open_or_create_fs(const char *filename) {
+    FILE *fp = fopen(filename, "r+");
+    if (!fp) {
+        fp = fopen(filename, "w+");
+        if (!fp) return NULL;
+    }
+    return fp;
+}
+
+char *read_entire_file(FILE *fp) {
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size < 0 || size > MAX_FILESYSTEM_SIZE) return NULL;
+    char *buffer = malloc(size + 1);
+    if (!buffer) return NULL;
+    fread(buffer, 1, size, fp);
+    buffer[size] = '\0';
+    return buffer;
+}
+
+char *get_file_content(FILE *fs_file, const char *filename) {
+    if (!fs_file || !filename) return NULL;
+    rewind(fs_file);
+    char *data = read_entire_file(fs_file);
+    if (!data) return NULL;
+
+    char *copy = strdup(data);
+    free(data);
+    if (!copy) return NULL;
+
+    char *lines[100000];
+    int count = 0;
+
+    char *line = strtok(copy, "\n");
+    while (line && count < 100000) {
+        lines[count++] = line;
+        line = strtok(NULL, "\n");
+    }
+
+    int i;
+    for (i = 0; i < count; i++) {
+        if (strcmp(lines[i], filename) == 0) {
+            break;
+        }
+    }
+
+    if (i == count) {
+        free(copy);
+        return NULL;
+    }
+
+    size_t bufsize = 0;
+    char *result = NULL;
+
+    for (int j = i + 1; j < count; j++) {
+        if (lines[j][0] == '/') break;
+        size_t len = strlen(lines[j]);
+        char *tmp = realloc(result, bufsize + len + 2);
+        if (!tmp) {
+            free(result);
+            free(copy);
+            return NULL;
+        }
+        result = tmp;
+        memcpy(result + bufsize, lines[j], len);
+        bufsize += len;
+        result[bufsize++] = '\n';
+        result[bufsize] = '\0';
+    }
+
+    if (result && bufsize > 0 && result[bufsize - 1] == '\n')
+        result[bufsize - 1] = '\0';
+
+    free(copy);
+    return result;
+}
+
+int delete_file_in_fs(FILE *fs_file, const char *filename) {
+    if (!fs_file || !filename) return -1;
+
+    rewind(fs_file);
+    char *data = read_entire_file(fs_file);
+    if (!data) return -1;
+
+    char *copy = strdup(data);
+    free(data);
+    if (!copy) return -1;
+
+    char *lines[100000];
+    int count = 0;
+
+    char *line = strtok(copy, "\n");
+    while (line && count < 100000) {
+        lines[count++] = line;
+        line = strtok(NULL, "\n");
+    }
+
+    char *new_fs = NULL;
+    size_t new_size = 0;
+    int skipping = 0;
+
+    for (int i = 0; i < count; i++) {
+        if (!skipping) {
+            if (strcmp(lines[i], filename) == 0) {
+                skipping = 1;
+                continue;
+            }
+            size_t len = strlen(lines[i]);
+            char *tmp = realloc(new_fs, new_size + len + 2);
+            if (!tmp) {
+                free(new_fs);
+                free(copy);
+                return -1;
+            }
+            new_fs = tmp;
+            memcpy(new_fs + new_size, lines[i], len);
+            new_size += len;
+            new_fs[new_size++] = '\n';
+            new_fs[new_size] = '\0';
+        } else {
+            if (lines[i][0] == '/') {
+                skipping = 0;
+                size_t len = strlen(lines[i]);
+                char *tmp = realloc(new_fs, new_size + len + 2);
+                if (!tmp) {
+                    free(new_fs);
+                    free(copy);
+                    return -1;
+                }
+                new_fs = tmp;
+                memcpy(new_fs + new_size, lines[i], len);
+                new_size += len;
+                new_fs[new_size++] = '\n';
+                new_fs[new_size] = '\0';
+            }
+        }
+    }
+
+    freopen(NULL, "w+", fs_file);
+    if (!fs_file) {
+        free(new_fs);
+        free(copy);
+        return -1;
+    }
+
+    if (new_fs) {
+        fwrite(new_fs, 1, new_size, fs_file);
+        fflush(fs_file);
+        free(new_fs);
+    }
+    free(copy);
+    return 0;
+}
